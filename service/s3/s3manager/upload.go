@@ -171,6 +171,9 @@ type Uploader struct {
 
 	// partPool allows for the re-usage of streaming payload part buffers between upload calls
 	partPool byteSlicePool
+
+	// Pacer, if specified, is used to (optionally) pace CPU-intensive upload work.
+	Pacer Pacer
 }
 
 // NewUploader creates a new Uploader instance to upload objects to S3. Pass In
@@ -201,6 +204,7 @@ func newUploader(client s3iface.S3API, options ...func(*Uploader)) *Uploader {
 		LeavePartsOnError: false,
 		MaxUploadParts:    MaxUploadParts,
 		BufferProvider:    defaultUploadBufferProvider(),
+		Pacer:             noopPacer{},
 	}
 
 	for _, option := range options {
@@ -678,6 +682,7 @@ func (u *multiuploader) shouldContinue(part int64, nextChunkLen int, err error) 
 func (u *multiuploader) readChunk(ch chan chunk) {
 	defer u.wg.Done()
 	for {
+		u.cfg.Pacer.Pace()
 		data, ok := <-ch
 
 		if !ok {
@@ -784,3 +789,16 @@ type readerAtSeeker interface {
 	io.ReaderAt
 	io.ReadSeeker
 }
+
+// Pacer is used to (optionally) pace CPU-intensive upload work.
+type Pacer interface {
+	Pace()
+}
+
+// noopPacer is a no-op implementation of the Pacer interface.
+type noopPacer struct{}
+
+var _ Pacer = noopPacer{}
+
+// Pace implements the Pacer interface.
+func (n noopPacer) Pace() {}
